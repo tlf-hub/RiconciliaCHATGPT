@@ -1,6 +1,6 @@
 from xml.etree import ElementTree as ET
 from db import get_db
-from utils import parse_decimal
+from utils import parse_decimal, stable_hash
 
 def parse_fatturapa(root: ET.Element, file_id: int, own_vat: str,
                     default_emessa=("7000","Ricavi vendite e prestazioni"),
@@ -30,10 +30,16 @@ def parse_fatturapa(root: ET.Element, file_id: int, own_vat: str,
 
     if direction == "ricevuta":
         party = header.find(".//{*}CedentePrestatore//{*}DatiAnagrafici//{*}Anagrafica//{*}Denominazione")
+        if party is None:
+            party = header.find(".//{*}CedentePrestatore//{*}DatiAnagrafici//{*}Anagrafica//{*}Cognome")
     else:
         party = header.find(".//{*}CessionarioCommittente//{*}DatiAnagrafici//{*}Anagrafica//{*}Denominazione")
+        if party is None:
+            party = header.find(".//{*}CessionarioCommittente//{*}DatiAnagrafici//{*}Anagrafica//{*}Cognome")
+
     party_name = party.text.strip() if party is not None and party.text else ""
 
+    # conto
     mapped_code = party_account_code_getter(party_name, direction) if party_account_code_getter else None
     if mapped_code:
         acc_code = str(mapped_code)
@@ -41,10 +47,13 @@ def parse_fatturapa(root: ET.Element, file_id: int, own_vat: str,
     else:
         acc_code, acc_name = default_emessa if direction == "emessa" else default_ricevuta
 
+    # chiave univoca
+    invoice_hash = stable_hash(direction, number, inv_date, f"{abs(total):.2f}", party_name, str(is_cn))
+
     con = get_db()
     con.execute("""INSERT OR IGNORE INTO invoices
-        (file_id,direction,number,invoice_date,party,total,currency,is_credit_note,account_code,account_name,residual)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (file_id, direction, number, inv_date, party_name, abs(total), "EUR", is_cn, acc_code, acc_name, abs(total)))
+        (file_id,direction,number,invoice_date,party,total,currency,is_credit_note,account_code,account_name,residual,invoice_hash)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (file_id, direction, number, inv_date, party_name, abs(total), "EUR", is_cn, acc_code, acc_name, abs(total), invoice_hash))
     con.commit()
     con.close()

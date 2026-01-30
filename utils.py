@@ -46,3 +46,9 @@ def normalize_text(s: str) -> str:
     if s is None:
         return ""
     return " ".join(str(s).strip().lower().split())
+
+
+def stable_hash(*parts: str) -> str:
+    """Hash deterministico per chiavi univoche (dedup)"""
+    s = "|".join("" if p is None else str(p) for p in parts)
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()

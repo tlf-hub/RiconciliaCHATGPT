@@ -1,11 +1,11 @@
 import io
 import pandas as pd
 from db import get_db
-from utils import parse_decimal, parse_date_any
+from utils import parse_decimal, parse_date_any, stable_hash
 
 TEMPLATE_COLUMNS = [
-    "booking_date","value_date","amount","currency",
-    "description","counterparty","reference","balance"
+    "booking_date", "value_date", "amount", "currency",
+    "description", "counterparty", "reference", "balance"
 ]
 
 def parse_bank_csv(blob: bytes, file_id: int):
@@ -17,17 +17,25 @@ def parse_bank_csv(blob: bytes, file_id: int):
         value = parse_date_any(r.get("value_date"))
         amt = parse_decimal(r.get("amount"))
         bal = parse_decimal(r.get("balance"))
+        currency = (r.get("currency") or "EUR")
+        desc = (r.get("description") or "")
+        cp = (r.get("counterparty") or "")
+        ref = (r.get("reference") or "")
+        move_hash = stable_hash(str(booking), str(value), str(amt), currency, desc, cp, ref)
+
         con.execute("""INSERT OR IGNORE INTO bank_moves
-            (file_id, source, booking_date, value_date, amount, currency, description, counterparty, reference, balance)
-            VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (file_id,"csv",
+            (file_id, source, booking_date, value_date, amount, currency, description, counterparty, reference, balance, move_hash)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (file_id, "csv",
              str(booking) if booking else None,
              str(value) if value else None,
              float(amt) if amt is not None else 0.0,
-             (r.get("currency") or "EUR"),
-             (r.get("description") or ""),
-             (r.get("counterparty") or ""),
-             (r.get("reference") or ""),
-             float(bal) if bal is not None else None))
+             currency,
+             desc,
+             cp,
+             ref,
+             float(bal) if bal is not None else None,
+             move_hash
+            ))
     con.commit()
     con.close()

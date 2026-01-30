@@ -32,31 +32,31 @@ def init_db():
         booking_date TEXT,
         value_date TEXT,
         amount REAL,
-        currency TEXT,
-        description TEXT,
-        counterparty TEXT,
-        reference TEXT,
+        currency TEXT DEFAULT 'EUR',
+        description TEXT NOT NULL DEFAULT '',
+        counterparty TEXT NOT NULL DEFAULT '',
+        reference TEXT NOT NULL DEFAULT '',
         balance REAL,
-        UNIQUE(booking_date, amount, COALESCE(reference,''), COALESCE(description,'')),
+        move_hash TEXT UNIQUE,
         FOREIGN KEY(file_id) REFERENCES files(id)
     );
 
     CREATE TABLE IF NOT EXISTS invoices(
         id INTEGER PRIMARY KEY,
         file_id INTEGER,
-        direction TEXT,
+        direction TEXT,                -- emessa / ricevuta
         number TEXT,
         invoice_date TEXT,
-        party TEXT,
-        total REAL,
-        currency TEXT,
+        party TEXT NOT NULL DEFAULT '',
+        total REAL,                    -- positivo
+        currency TEXT DEFAULT 'EUR',
         is_credit_note INTEGER DEFAULT 0,
         account_code TEXT,
         account_name TEXT,
-        status TEXT DEFAULT 'aperta',
+        status TEXT DEFAULT 'aperta',  -- aperta/parziale/saldata
         paid_amount REAL DEFAULT 0,
         residual REAL DEFAULT 0,
-        UNIQUE(direction, number, total, invoice_date, COALESCE(party,'')),
+        invoice_hash TEXT UNIQUE,
         FOREIGN KEY(file_id) REFERENCES files(id)
     );
 
@@ -102,7 +102,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS chart_accounts(
         code TEXT PRIMARY KEY,
         name TEXT,
-        kind TEXT
+        kind TEXT  -- asset/liability/equity/revenue/expense/suspense
     );
 
     CREATE TABLE IF NOT EXISTS party_account_map(
@@ -125,10 +125,26 @@ def init_db():
         created_at TEXT
     );
     """)
+
+    # Mini-migrazioni (se DB già esiste)
+    # - aggiungi colonne mancanti senza rompere nulla
+    def _col_exists(table, col):
+        cur.execute(f"PRAGMA table_info({table})")
+        return any(r[1] == col for r in cur.fetchall())
+
+    for col_def in [
+        ("bank_moves", "move_hash", "TEXT"),
+        ("invoices", "invoice_hash", "TEXT"),
+    ]:
+        t, c, typ = col_def
+        if not _col_exists(t, c):
+            cur.execute(f"ALTER TABLE {t} ADD COLUMN {c} {typ}")
+
     con.commit()
     con.close()
 
 def save_file(name: str, kind: str, sha: str, blob: bytes) -> Tuple[int, bool]:
+    """Ritorna (file_id, is_new) con deduplica su sha."""
     con = get_db()
     cur = con.cursor()
     cur.execute("SELECT id FROM files WHERE sha=?", (sha,))
