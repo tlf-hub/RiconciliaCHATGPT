@@ -3,7 +3,7 @@ import io
 import pandas as pd
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-from db import get_db
+from db import get_db, ensure_schema
 
 def _simple_pdf(title: str, lines: list[str]) -> bytes:
     buf = io.BytesIO()
@@ -27,6 +27,7 @@ def _simple_pdf(title: str, lines: list[str]) -> bytes:
 
 def render():
     st.subheader("Export DB")
+    ensure_schema()
     con = get_db()
     bank = pd.read_sql("SELECT * FROM bank_moves", con)
     inv = pd.read_sql("SELECT * FROM invoices", con)
@@ -42,14 +43,16 @@ def render():
         sdd.to_excel(w, "sdd", index=False)
         matches.to_excel(w, "matches", index=False)
         sddm.to_excel(w, "sdd_matches", index=False)
-    st.download_button("⬇️ Excel completo", out.getvalue(), file_name="export_completo.xlsx")
+
+    st.download_button("⬇️ Scarica Excel completo", out.getvalue(), file_name="export_completo.xlsx")
 
     if st.button("PDF riepilogo"):
-        pdf = _simple_pdf("Riepilogo DB", [
-            f"Movimenti: {len(bank)}",
+        lines = [
+            f"Movimenti bancari: {len(bank)}",
             f"Fatture: {len(inv)}",
             f"SDD: {len(sdd)}",
             f"Match fatture: {len(matches)}",
             f"Match SDD: {len(sddm)}",
-        ])
-        st.download_button("⬇️ PDF riepilogo", pdf, file_name="riepilogo.pdf", mime="application/pdf")
+        ]
+        pdf = _simple_pdf("Riepilogo DB riconciliazione", lines)
+        st.download_button("⬇️ Scarica PDF riepilogo", pdf, file_name="riepilogo.pdf", mime="application/pdf")

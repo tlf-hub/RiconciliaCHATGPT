@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
-from db import get_db, log_audit
+from db import get_db, ensure_schema, log_audit
 from matching.engine import suggest_matches_sdd, insert_sdd_match
 
 def render(state):
     st.subheader("Riconciliazione SDD ↔ incassi bancari")
     user = state.get("user","admin")
+    ensure_schema()
 
     con = get_db()
     bm = pd.read_sql("SELECT * FROM bank_moves ORDER BY booking_date DESC", con)
@@ -17,19 +18,30 @@ def render(state):
                         ORDER BY m.created_at DESC""", con)
     con.close()
 
+    st.markdown("#### Suggerimenti")
     if st.button("🤖 Genera suggerimenti SDD"):
         sug = suggest_matches_sdd()
-        st.dataframe(sug, use_container_width=True) if not sug.empty else st.info("Nessun suggerimento.")
+        if sug.empty:
+            st.info("Nessun suggerimento disponibile.")
+        else:
+            st.dataframe(sug, use_container_width=True)
 
     if bm.empty or sdd.empty:
         st.info("Carica movimenti e SDD.")
         return
 
+    st.markdown("#### Inserisci/aggiorna match SDD")
     with st.form("sdd_form"):
-        bank_move_id = st.selectbox("Movimento", bm["id"].tolist(),
-            format_func=lambda x: f"#{x} | {bm[bm.id==x].iloc[0].booking_date} | {bm[bm.id==x].iloc[0].amount} | {str(bm[bm.id==x].iloc[0].description)[:60]}")
-        sdd_id = st.selectbox("Riga SDD", sdd["id"].tolist(),
-            format_func=lambda x: f"#{x} | {sdd[sdd.id==x].iloc[0].due_date} | {sdd[sdd.id==x].iloc[0].amount} | {sdd[sdd.id==x].iloc[0].debtor} | {sdd[sdd.id==x].iloc[0].endtoend}")
+        bank_move_id = st.selectbox(
+            "Movimento bancario",
+            bm["id"].tolist(),
+            format_func=lambda x: f"#{x} | {bm[bm.id==x].iloc[0].booking_date} | {bm[bm.id==x].iloc[0].amount} | {str(bm[bm.id==x].iloc[0].description)[:60]}"
+        )
+        sdd_id = st.selectbox(
+            "Riga SDD",
+            sdd["id"].tolist(),
+            format_func=lambda x: f"#{x} | {sdd[sdd.id==x].iloc[0].due_date} | {sdd[sdd.id==x].iloc[0].amount} | {sdd[sdd.id==x].iloc[0].debtor} | {sdd[sdd.id==x].iloc[0].endtoend}"
+        )
         allocated = st.number_input("Importo allocato", min_value=0.0, value=0.0, step=0.01)
         certainty = st.selectbox("Certezza", ["green","yellow"], index=0)
         confirmed = st.checkbox("Conferma", value=True)
@@ -41,5 +53,5 @@ def render(state):
                   {"bank_move_id": int(bank_move_id), "sdd_id": int(sdd_id), "allocated": float(allocated), "certainty": certainty, "confirmed": confirmed})
         st.success("Match SDD salvato.")
 
-    st.markdown("### Match SDD")
+    st.markdown("#### Match SDD esistenti")
     st.dataframe(mt, use_container_width=True)

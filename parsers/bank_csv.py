@@ -1,14 +1,19 @@
 import io
 import pandas as pd
-from db import get_db
-from utils import parse_decimal, parse_date_any, stable_hash
+from db import get_db, ensure_schema
+from utils import parse_decimal, parse_date_any, sha256_text
 
 TEMPLATE_COLUMNS = [
     "booking_date", "value_date", "amount", "currency",
     "description", "counterparty", "reference", "balance"
 ]
 
+def _move_hash(booking_date, value_date, amount, currency, description, counterparty, reference):
+    payload = f"{booking_date}|{value_date}|{amount}|{currency}|{description}|{counterparty}|{reference}"
+    return sha256_text(payload)
+
 def parse_bank_csv(blob: bytes, file_id: int):
+    ensure_schema()
     df = pd.read_csv(io.BytesIO(blob))
     df.columns = [c.strip() for c in df.columns]
     con = get_db()
@@ -21,7 +26,7 @@ def parse_bank_csv(blob: bytes, file_id: int):
         desc = (r.get("description") or "")
         cp = (r.get("counterparty") or "")
         ref = (r.get("reference") or "")
-        move_hash = stable_hash(str(booking), str(value), str(amt), currency, desc, cp, ref)
+        mh = _move_hash(str(booking) if booking else "", str(value) if value else "", float(amt) if amt is not None else 0.0, currency, desc, cp, ref)
 
         con.execute("""INSERT OR IGNORE INTO bank_moves
             (file_id, source, booking_date, value_date, amount, currency, description, counterparty, reference, balance, move_hash)
@@ -31,11 +36,9 @@ def parse_bank_csv(blob: bytes, file_id: int):
              str(value) if value else None,
              float(amt) if amt is not None else 0.0,
              currency,
-             desc,
-             cp,
-             ref,
+             desc, cp, ref,
              float(bal) if bal is not None else None,
-             move_hash
+             mh
             ))
     con.commit()
     con.close()

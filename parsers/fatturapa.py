@@ -1,12 +1,13 @@
 from xml.etree import ElementTree as ET
-from db import get_db
-from utils import parse_decimal, stable_hash
+from db import get_db, ensure_schema
+from utils import parse_decimal, sha256_text
 
 def parse_fatturapa(root: ET.Element, file_id: int, own_vat: str,
                     default_emessa=("7000","Ricavi vendite e prestazioni"),
                     default_ricevuta=("6100","Servizi"),
                     party_account_code_getter=None,
                     account_name_getter=None):
+    ensure_schema()
     header = root.find(".//{*}FatturaElettronicaHeader")
     body = root.find(".//{*}FatturaElettronicaBody")
     if header is None or body is None:
@@ -39,7 +40,6 @@ def parse_fatturapa(root: ET.Element, file_id: int, own_vat: str,
 
     party_name = party.text.strip() if party is not None and party.text else ""
 
-    # conto
     mapped_code = party_account_code_getter(party_name, direction) if party_account_code_getter else None
     if mapped_code:
         acc_code = str(mapped_code)
@@ -47,13 +47,12 @@ def parse_fatturapa(root: ET.Element, file_id: int, own_vat: str,
     else:
         acc_code, acc_name = default_emessa if direction == "emessa" else default_ricevuta
 
-    # chiave univoca
-    invoice_hash = stable_hash(direction, number, inv_date, f"{abs(total):.2f}", party_name, str(is_cn))
+    inv_hash = sha256_text(f"{direction}|{number}|{inv_date}|{party_name}|{abs(total)}|{is_cn}")
 
     con = get_db()
     con.execute("""INSERT OR IGNORE INTO invoices
         (file_id,direction,number,invoice_date,party,total,currency,is_credit_note,account_code,account_name,residual,invoice_hash)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (file_id, direction, number, inv_date, party_name, abs(total), "EUR", is_cn, acc_code, acc_name, abs(total), invoice_hash))
+        (file_id, direction, number, inv_date, party_name, abs(total), "EUR", is_cn, acc_code, acc_name, abs(total), inv_hash))
     con.commit()
     con.close()

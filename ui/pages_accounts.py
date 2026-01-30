@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
-from db import get_db, log_audit
+from db import get_db, ensure_schema, log_audit
 from accounting.chart import get_chart_df, upsert_account, set_party_map, ensure_default_chart
 
 def render(state):
-    st.subheader("Piano dei conti + mappa controparti")
+    st.subheader("Piano dei conti + mappa controparti → conto")
+    ensure_schema()
     ensure_default_chart()
     user = state.get("user","admin")
 
@@ -13,7 +14,7 @@ def render(state):
     st.dataframe(chart, use_container_width=True)
 
     with st.expander("➕ Aggiungi / modifica conto"):
-        code = st.text_input("Codice", "")
+        code = st.text_input("Codice conto", "")
         name = st.text_input("Descrizione", "")
         kind = st.selectbox("Tipo", ["asset","liability","equity","revenue","expense","suspense"])
         if st.button("Salva conto"):
@@ -24,12 +25,13 @@ def render(state):
             else:
                 st.warning("Compila codice e descrizione.")
 
-    st.markdown("### Mappa controparte → conto (default)")
+    st.markdown("### Mappa per controparte (default conto su nuove fatture)")
     con = get_db()
     parties = pd.read_sql("SELECT DISTINCT party, direction FROM invoices WHERE party IS NOT NULL AND party<>''", con)
     con.close()
+
     if parties.empty:
-        st.info("Carica almeno una fattura.")
+        st.info("Carica almeno una fattura per vedere le controparti.")
         return
 
     party = st.selectbox("Controparte", sorted(parties["party"].unique().tolist()))

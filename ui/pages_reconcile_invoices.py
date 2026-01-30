@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
-from db import get_db, log_audit
+from db import get_db, ensure_schema, log_audit
 from matching.engine import suggest_matches_invoice, insert_match, update_invoice_statuses
 
 def render(state):
-    st.subheader("Riconciliazione fatture ↔ banca (split/acconti)")
+    st.subheader("Riconciliazione fatture ↔ banca (split / acconti / note di credito)")
     user = state.get("user","admin")
+    ensure_schema()
 
     con = get_db()
     bm = pd.read_sql("SELECT * FROM bank_moves ORDER BY booking_date DESC", con)
@@ -17,20 +18,31 @@ def render(state):
                         ORDER BY m.created_at DESC""", con)
     con.close()
 
+    st.markdown("#### Suggerimenti")
     if st.button("🤖 Genera suggerimenti"):
         sug = suggest_matches_invoice()
-        st.dataframe(sug, use_container_width=True) if not sug.empty else st.info("Nessun suggerimento.")
+        if sug.empty:
+            st.info("Nessun suggerimento disponibile.")
+        else:
+            st.dataframe(sug, use_container_width=True)
 
     if bm.empty or inv.empty:
         st.info("Carica movimenti e fatture.")
         return
 
+    st.markdown("#### Inserisci/aggiorna match")
     with st.form("match_form"):
-        bank_move_id = st.selectbox("Movimento", bm["id"].tolist(),
-            format_func=lambda x: f"#{x} | {bm[bm.id==x].iloc[0].booking_date} | {bm[bm.id==x].iloc[0].amount} | {str(bm[bm.id==x].iloc[0].description)[:60]}")
-        invoice_id = st.selectbox("Fattura", inv["id"].tolist(),
-            format_func=lambda x: f"#{x} | {inv[inv.id==x].iloc[0].direction} | {inv[inv.id==x].iloc[0].number} | {inv[inv.id==x].iloc[0].party} | {inv[inv.id==x].iloc[0].total} | {inv[inv.id==x].iloc[0].status}")
-        allocated = st.number_input("Importo allocato", min_value=0.0, value=0.0, step=0.01)
+        bank_move_id = st.selectbox(
+            "Movimento bancario",
+            bm["id"].tolist(),
+            format_func=lambda x: f"#{x} | {bm[bm.id==x].iloc[0].booking_date} | {bm[bm.id==x].iloc[0].amount} | {str(bm[bm.id==x].iloc[0].description)[:60]}"
+        )
+        invoice_id = st.selectbox(
+            "Fattura",
+            inv["id"].tolist(),
+            format_func=lambda x: f"#{x} | {inv[inv.id==x].iloc[0].direction} | {inv[inv.id==x].iloc[0].number} | {inv[inv.id==x].iloc[0].party} | {inv[inv.id==x].iloc[0].total} | {inv[inv.id==x].iloc[0].status}"
+        )
+        allocated = st.number_input("Importo allocato (per split/acconto)", min_value=0.0, value=0.0, step=0.01)
         certainty = st.selectbox("Certezza", ["green","yellow"], index=0)
         confirmed = st.checkbox("Conferma", value=True)
         ok = st.form_submit_button("Salva match")
@@ -42,5 +54,5 @@ def render(state):
         update_invoice_statuses()
         st.success("Match salvato; stato fattura aggiornato.")
 
-    st.markdown("### Match")
+    st.markdown("#### Match esistenti")
     st.dataframe(mt, use_container_width=True)

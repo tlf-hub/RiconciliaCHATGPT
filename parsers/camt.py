@@ -1,8 +1,9 @@
 from xml.etree import ElementTree as ET
-from db import get_db
-from utils import parse_decimal, stable_hash
+from db import get_db, ensure_schema
+from utils import parse_decimal, sha256_text
 
 def parse_camt(root: ET.Element, file_id: int):
+    ensure_schema()
     con = get_db()
     for ntry in root.findall(".//{*}Ntry"):
         amt_el = ntry.find(".//{*}Amt")
@@ -12,10 +13,7 @@ def parse_camt(root: ET.Element, file_id: int):
 
         amt = float(parse_decimal(amt_el.text)) if amt_el is not None else 0.0
         ind = (ind_el.text or "").strip().upper() if ind_el is not None else "CRDT"
-        if ind == "DBIT":
-            amt = -abs(amt)
-        else:
-            amt = abs(amt)
+        amt = -abs(amt) if ind == "DBIT" else abs(amt)
 
         booking = bdt_el.text.strip() if bdt_el is not None and bdt_el.text else None
         value = vdt_el.text.strip() if vdt_el is not None and vdt_el.text else None
@@ -34,11 +32,11 @@ def parse_camt(root: ET.Element, file_id: int):
         bal_el = root.find(".//{*}Bal//{*}Amt")
         bal = float(parse_decimal(bal_el.text)) if bal_el is not None else None
 
-        move_hash = stable_hash(booking, value, f"{amt:.2f}", "EUR", desc, cp, ref)
+        mh = sha256_text(f"{booking}|{value}|{amt}|EUR|{desc}|{cp}|{ref}")
 
         con.execute("""INSERT OR IGNORE INTO bank_moves
             (file_id, source, booking_date, value_date, amount, currency, description, counterparty, reference, balance, move_hash)
             VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (file_id, "camt", booking, value, amt, "EUR", desc, cp, ref, bal, move_hash))
+            (file_id, "camt", booking, value, amt, "EUR", desc, cp, ref, bal, mh))
     con.commit()
     con.close()

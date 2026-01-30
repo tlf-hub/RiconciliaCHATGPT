@@ -1,14 +1,36 @@
-import sqlite3, json
+import os
+import sqlite3
+import json
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
+from pathlib import Path
 
-DB_PATH = "recon.db"
+APP_NAME = "riconcilia"
+# Prefer a writable folder. Streamlit Cloud is usually writable, but we keep it safe.
+DEFAULT_DB_DIR = Path(os.environ.get("RECON_DB_DIR", "./data"))
+DEFAULT_DB_DIR.mkdir(parents=True, exist_ok=True)
 
-def get_db():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+DB_PATH = os.environ.get("RECON_DB_PATH", str(DEFAULT_DB_DIR / "recon.db"))
 
 def now_iso():
     return datetime.utcnow().isoformat()
+
+def _connect(path: str) -> sqlite3.Connection:
+    con = sqlite3.connect(path, check_same_thread=False, timeout=30)
+    # Pragmas for better concurrency on Streamlit
+    con.execute("PRAGMA foreign_keys=ON;")
+    con.execute("PRAGMA journal_mode=WAL;")
+    con.execute("PRAGMA synchronous=NORMAL;")
+    con.execute("PRAGMA busy_timeout=5000;")
+    return con
+
+def get_db() -> sqlite3.Connection:
+    # If the default path fails (permissions, etc.), fall back to /tmp.
+    try:
+        return _connect(DB_PATH)
+    except sqlite3.OperationalError:
+        tmp_path = os.environ.get("RECON_DB_PATH_FALLBACK", "/tmp/recon.db")
+        return _connect(tmp_path)
 
 def init_db():
     con = get_db()
@@ -32,10 +54,10 @@ def init_db():
         booking_date TEXT,
         value_date TEXT,
         amount REAL,
-        currency TEXT DEFAULT 'EUR',
-        description TEXT NOT NULL DEFAULT '',
-        counterparty TEXT NOT NULL DEFAULT '',
-        reference TEXT NOT NULL DEFAULT '',
+        currency TEXT,
+        description TEXT,
+        counterparty TEXT,
+        reference TEXT,
         balance REAL,
         move_hash TEXT UNIQUE,
         FOREIGN KEY(file_id) REFERENCES files(id)
@@ -44,16 +66,16 @@ def init_db():
     CREATE TABLE IF NOT EXISTS invoices(
         id INTEGER PRIMARY KEY,
         file_id INTEGER,
-        direction TEXT,                -- emessa / ricevuta
+        direction TEXT,
         number TEXT,
         invoice_date TEXT,
-        party TEXT NOT NULL DEFAULT '',
-        total REAL,                    -- positivo
-        currency TEXT DEFAULT 'EUR',
+        party TEXT,
+        total REAL,
+        currency TEXT,
         is_credit_note INTEGER DEFAULT 0,
         account_code TEXT,
         account_name TEXT,
-        status TEXT DEFAULT 'aperta',  -- aperta/parziale/saldata
+        status TEXT DEFAULT 'aperta',
         paid_amount REAL DEFAULT 0,
         residual REAL DEFAULT 0,
         invoice_hash TEXT UNIQUE,
@@ -70,6 +92,7 @@ def init_db():
         mandate TEXT,
         creditor TEXT,
         created_at TEXT,
+        sdd_hash TEXT UNIQUE,
         FOREIGN KEY(file_id) REFERENCES files(id)
     );
 
@@ -81,9 +104,9 @@ def init_db():
         certainty TEXT,
         confirmed INTEGER DEFAULT 0,
         created_at TEXT,
+        UNIQUE(bank_move_id, invoice_id),
         FOREIGN KEY(bank_move_id) REFERENCES bank_moves(id),
-        FOREIGN KEY(invoice_id) REFERENCES invoices(id),
-        UNIQUE(bank_move_id, invoice_id)
+        FOREIGN KEY(invoice_id) REFERENCES invoices(id)
     );
 
     CREATE TABLE IF NOT EXISTS sdd_matches(
@@ -94,15 +117,15 @@ def init_db():
         certainty TEXT,
         confirmed INTEGER DEFAULT 0,
         created_at TEXT,
+        UNIQUE(bank_move_id, sdd_id),
         FOREIGN KEY(bank_move_id) REFERENCES bank_moves(id),
-        FOREIGN KEY(sdd_id) REFERENCES sdd(id),
-        UNIQUE(bank_move_id, sdd_id)
+        FOREIGN KEY(sdd_id) REFERENCES sdd(id)
     );
 
     CREATE TABLE IF NOT EXISTS chart_accounts(
         code TEXT PRIMARY KEY,
         name TEXT,
-        kind TEXT  -- asset/liability/equity/revenue/expense/suspense
+        kind TEXT
     );
 
     CREATE TABLE IF NOT EXISTS party_account_map(
@@ -125,26 +148,26 @@ def init_db():
         created_at TEXT
     );
     """)
-
-    # Mini-migrazioni (se DB già esiste)
-    # - aggiungi colonne mancanti senza rompere nulla
-    def _col_exists(table, col):
-        cur.execute(f"PRAGMA table_info({table})")
-        return any(r[1] == col for r in cur.fetchall())
-
-    for col_def in [
-        ("bank_moves", "move_hash", "TEXT"),
-        ("invoices", "invoice_hash", "TEXT"),
-    ]:
-        t, c, typ = col_def
-        if not _col_exists(t, c):
-            cur.execute(f"ALTER TABLE {t} ADD COLUMN {c} {typ}")
-
     con.commit()
     con.close()
 
+def ensure_schema():
+    """If DB exists but tables are missing (partial schema), recreate missing ones."""
+    con = get_db()
+    try:
+        cur = con.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='files'")
+        if cur.fetchone() is None:
+            con.close()
+            init_db()
+        else:
+            con.close()
+    except sqlite3.OperationalError:
+        con.close()
+        init_db()
+
 def save_file(name: str, kind: str, sha: str, blob: bytes) -> Tuple[int, bool]:
-    """Ritorna (file_id, is_new) con deduplica su sha."""
+    ensure_schema()
     con = get_db()
     cur = con.cursor()
     cur.execute("SELECT id FROM files WHERE sha=?", (sha,))
@@ -155,12 +178,13 @@ def save_file(name: str, kind: str, sha: str, blob: bytes) -> Tuple[int, bool]:
     cur.execute("INSERT INTO files(sha,name,kind,uploaded_at,blob) VALUES (?,?,?,?,?)",
                 (sha, name, kind, now_iso(), blob))
     con.commit()
-    fid = int(cur.lastrowid)
+    file_id = int(cur.lastrowid)
     con.close()
-    return fid, True
+    return file_id, True
 
 def log_audit(user: str, action: str, entity: str, entity_id: int,
               before: Optional[Dict[str, Any]], after: Optional[Dict[str, Any]]):
+    ensure_schema()
     con = get_db()
     con.execute(
         "INSERT INTO audit_log(user,action,entity,entity_id,before,after,created_at) VALUES (?,?,?,?,?,?,?)",

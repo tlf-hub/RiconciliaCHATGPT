@@ -15,12 +15,12 @@ def _pdf_from_tb(tb: pd.DataFrame, title: str) -> bytes:
     y -= 25
     c.setFont("Helvetica", 9)
 
-    headers = ["Conto","Descrizione","Dare","Avere","Saldo Dare","Saldo Avere"]
+    headers = ["Conto", "Descrizione", "Dare", "Avere", "Saldo Dare", "Saldo Avere"]
     x = [40, 90, 330, 395, 460, 525]
     for i, h in enumerate(headers):
         c.drawString(x[i], y, h)
     y -= 10
-    c.line(40, y, width-40, y)
+    c.line(40, y, width - 40, y)
     y -= 14
 
     for _, r in tb.iterrows():
@@ -30,10 +30,10 @@ def _pdf_from_tb(tb: pd.DataFrame, title: str) -> bytes:
             c.setFont("Helvetica", 9)
         c.drawString(x[0], y, str(r["account_code"]))
         c.drawString(x[1], y, str(r["account_name"])[:35])
-        c.drawRightString(x[2]+40, y, f'{float(r["dare"]):.2f}')
-        c.drawRightString(x[3]+40, y, f'{float(r["avere"]):.2f}')
-        c.drawRightString(x[4]+40, y, f'{float(r["saldo_dare"]):.2f}')
-        c.drawRightString(x[5]+40, y, f'{float(r["saldo_avere"]):.2f}')
+        c.drawRightString(x[2] + 40, y, f'{float(r["dare"]):.2f}')
+        c.drawRightString(x[3] + 40, y, f'{float(r["avere"]):.2f}')
+        c.drawRightString(x[4] + 40, y, f'{float(r["saldo_dare"]):.2f}')
+        c.drawRightString(x[5] + 40, y, f'{float(r["saldo_avere"]):.2f}')
         y -= 12
 
     c.showPage()
@@ -41,7 +41,9 @@ def _pdf_from_tb(tb: pd.DataFrame, title: str) -> bytes:
     return buf.getvalue()
 
 def render():
-    st.subheader("Bilancino economico‑patrimoniale")
+    st.subheader("Bilancino economico‑patrimoniale (periodo)")
+    st.caption("Bilancino da fatture + banca. I movimenti non riconciliati vanno nei 'Sospesi' per chiudere la quadratura.")
+
     c1, c2 = st.columns(2)
     start = c1.date_input("Data inizio", value=pd.Timestamp.today().date().replace(day=1))
     end = c2.date_input("Data fine", value=pd.Timestamp.today().date())
@@ -52,13 +54,14 @@ def render():
             st.info("Nessuna scrittura nel periodo.")
             return
         tb = trial_balance(journal)
+        st.markdown("### Bilancino")
         st.dataframe(tb, use_container_width=True)
 
         out = io.BytesIO()
         with pd.ExcelWriter(out, engine="xlsxwriter") as w:
             journal.to_excel(w, "prima_nota", index=False)
             tb.to_excel(w, "bilancino", index=False)
-        st.download_button("⬇️ Excel (prima nota + bilancino)", out.getvalue(), file_name="bilancino.xlsx")
+        st.download_button("⬇️ Scarica Excel (prima nota + bilancino)", out.getvalue(), file_name="bilancino.xlsx")
 
         pdf = _pdf_from_tb(tb, f"Bilancino {start} - {end}")
-        st.download_button("⬇️ PDF bilancino", pdf, file_name="bilancino.pdf", mime="application/pdf")
+        st.download_button("⬇️ Scarica PDF bilancino", pdf, file_name="bilancino.pdf", mime="application/pdf")

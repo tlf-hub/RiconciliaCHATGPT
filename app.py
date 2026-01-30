@@ -1,6 +1,6 @@
 import streamlit as st
 
-from db import init_db
+from db import init_db, ensure_schema
 from accounting.chart import ensure_default_chart
 from ui.pages_upload import render as upload_page
 from ui.pages_data import render as data_page
@@ -12,14 +12,16 @@ from ui.pages_bilancino import render as bilancino_page
 from ui.pages_audit import render as audit_page
 from ui.pages_export import render as export_page
 
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.4.0"
 
 def main():
     st.set_page_config(page_title="Riconciliazione Contabile", layout="wide")
     st.title("Riconciliazione Contabile")
     st.caption(f"Versione {APP_VERSION} • Streamlit + SQLite")
 
+    # Ensure DB schema exists even if a partial/empty DB file is present
     init_db()
+    ensure_schema()
     ensure_default_chart()
 
     st.sidebar.header("Impostazioni")

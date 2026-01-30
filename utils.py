@@ -6,6 +6,9 @@ from typing import Optional
 def sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
+def sha256_text(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8", errors="ignore")).hexdigest()
+
 def xml_ns_strip(tag: str) -> str:
     return tag.split("}", 1)[-1] if "}" in tag else tag
 
@@ -15,6 +18,7 @@ def parse_decimal(x) -> Optional[Decimal]:
     if isinstance(x, (int, float, Decimal)):
         return Decimal(str(x))
     s = str(x).strip().replace(" ", "")
+    # 1.234,56 -> 1234.56
     if s.count(",") == 1 and s.count(".") >= 1:
         s = s.replace(".", "").replace(",", ".")
     elif s.count(",") == 1 and s.count(".") == 0:
@@ -38,7 +42,7 @@ def parse_date_any(s) -> Optional[date]:
         except Exception:
             pass
     try:
-        return datetime.fromisoformat(s.replace("Z","")).date()
+        return datetime.fromisoformat(s.replace("Z", "")).date()
     except Exception:
         return None
 
@@ -46,9 +50,3 @@ def normalize_text(s: str) -> str:
     if s is None:
         return ""
     return " ".join(str(s).strip().lower().split())
-
-
-def stable_hash(*parts: str) -> str:
-    """Hash deterministico per chiavi univoche (dedup)"""
-    s = "|".join("" if p is None else str(p) for p in parts)
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()

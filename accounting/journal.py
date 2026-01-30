@@ -1,11 +1,12 @@
 import pandas as pd
-from db import get_db
+from db import get_db, ensure_schema
 from utils import parse_date_any
 
 def _signed_total(total: float, is_credit_note: int) -> float:
     return -abs(total) if int(is_credit_note or 0) == 1 else abs(total)
 
 def build_journal(start_date: str, end_date: str) -> pd.DataFrame:
+    ensure_schema()
     con = get_db()
     inv = pd.read_sql("SELECT * FROM invoices", con)
     bm = pd.read_sql("SELECT * FROM bank_moves", con)
@@ -37,27 +38,27 @@ def build_journal(start_date: str, end_date: str) -> pd.DataFrame:
         if direction == "emessa":
             if signed >= 0:
                 lines += [
-                    {"date": r.invoice_date, "doc":"FATT", "doc_id": int(r.id), "account_code":"1200", "account_name": chart_name.get("1200","Crediti v/clienti"), "dare": abs(signed), "avere": 0.0},
-                    {"date": r.invoice_date, "doc":"FATT", "doc_id": int(r.id), "account_code": acc_code, "account_name": acc_name, "dare": 0.0, "avere": abs(signed)},
+                    {"date": r.invoice_date, "doc": "FATTURA", "doc_id": int(r.id), "account_code": "1200", "account_name": chart_name.get("1200","Crediti v/clienti"), "dare": abs(signed), "avere": 0.0},
+                    {"date": r.invoice_date, "doc": "FATTURA", "doc_id": int(r.id), "account_code": acc_code, "account_name": acc_name, "dare": 0.0, "avere": abs(signed)},
                 ]
             else:
                 lines += [
-                    {"date": r.invoice_date, "doc":"NC", "doc_id": int(r.id), "account_code": acc_code, "account_name": acc_name, "dare": abs(signed), "avere": 0.0},
-                    {"date": r.invoice_date, "doc":"NC", "doc_id": int(r.id), "account_code":"1200", "account_name": chart_name.get("1200","Crediti v/clienti"), "dare": 0.0, "avere": abs(signed)},
+                    {"date": r.invoice_date, "doc": "NC", "doc_id": int(r.id), "account_code": acc_code, "account_name": acc_name, "dare": abs(signed), "avere": 0.0},
+                    {"date": r.invoice_date, "doc": "NC", "doc_id": int(r.id), "account_code": "1200", "account_name": chart_name.get("1200","Crediti v/clienti"), "dare": 0.0, "avere": abs(signed)},
                 ]
         else:
             if signed >= 0:
                 lines += [
-                    {"date": r.invoice_date, "doc":"FATT", "doc_id": int(r.id), "account_code": acc_code, "account_name": acc_name, "dare": abs(signed), "avere": 0.0},
-                    {"date": r.invoice_date, "doc":"FATT", "doc_id": int(r.id), "account_code":"2200", "account_name": chart_name.get("2200","Debiti v/fornitori"), "dare": 0.0, "avere": abs(signed)},
+                    {"date": r.invoice_date, "doc": "FATTURA", "doc_id": int(r.id), "account_code": acc_code, "account_name": acc_name, "dare": abs(signed), "avere": 0.0},
+                    {"date": r.invoice_date, "doc": "FATTURA", "doc_id": int(r.id), "account_code": "2200", "account_name": chart_name.get("2200","Debiti v/fornitori"), "dare": 0.0, "avere": abs(signed)},
                 ]
             else:
                 lines += [
-                    {"date": r.invoice_date, "doc":"NC", "doc_id": int(r.id), "account_code":"2200", "account_name": chart_name.get("2200","Debiti v/fornitori"), "dare": abs(signed), "avere": 0.0},
-                    {"date": r.invoice_date, "doc":"NC", "doc_id": int(r.id), "account_code": acc_code, "account_name": acc_name, "dare": 0.0, "avere": abs(signed)},
+                    {"date": r.invoice_date, "doc": "NC", "doc_id": int(r.id), "account_code": "2200", "account_name": chart_name.get("2200","Debiti v/fornitori"), "dare": abs(signed), "avere": 0.0},
+                    {"date": r.invoice_date, "doc": "NC", "doc_id": int(r.id), "account_code": acc_code, "account_name": acc_name, "dare": 0.0, "avere": abs(signed)},
                 ]
 
-    # Banca (cassa) + sospesi
+    # Banca: parte riconciliata + sospesi
     if not bm.empty:
         bm = bm.copy()
         bm["alloc"] = 0.0
@@ -67,39 +68,33 @@ def build_journal(start_date: str, end_date: str) -> pd.DataFrame:
 
         bm_p = bm[bm.booking_date.apply(in_range)].copy()
 
-        # righe riconciliate
         if not mt.empty:
-            inv_dir = inv[["id","direction"]].rename(columns={"id":"invoice_id"})
+            inv_map = inv[["id","direction"]].rename(columns={"id":"invoice_id"})
             mt2 = mt.merge(bm[["id","booking_date","amount"]], left_on="bank_move_id", right_on="id", how="left")
-            mt2 = mt2.merge(inv_dir, on="invoice_id", how="left")
+            mt2 = mt2.merge(inv_map, on="invoice_id", how="left")
             for _, r in mt2.iterrows():
                 if not in_range(r.booking_date):
                     continue
                 alloc = float(r.allocated or 0)
                 amt = float(r.amount or 0)
-                direction = (r.direction or "").lower()
+                inv_dir = (r.direction or "").lower()
 
-                # banca
                 if amt >= 0:
-                    lines.append({"date": r.booking_date, "doc":"PAG", "doc_id": int(r.bank_move_id), "account_code":"1010","account_name": chart_name.get("1010","Banca c/c"), "dare": alloc, "avere":0.0})
+                    lines.append({"date": r.booking_date, "doc": "PAG", "doc_id": int(r.bank_move_id), "account_code":"1010","account_name": chart_name.get("1010","Banca c/c"), "dare": alloc, "avere":0.0})
                 else:
-                    lines.append({"date": r.booking_date, "doc":"PAG", "doc_id": int(r.bank_move_id), "account_code":"1010","account_name": chart_name.get("1010","Banca c/c"), "dare": 0.0, "avere":alloc})
+                    lines.append({"date": r.booking_date, "doc": "PAG", "doc_id": int(r.bank_move_id), "account_code":"1010","account_name": chart_name.get("1010","Banca c/c"), "dare": 0.0, "avere":alloc})
 
-                # contropartita
-                if direction == "emessa":
-                    # incasso: Avere crediti
+                if inv_dir == "emessa":
                     if amt >= 0:
                         lines.append({"date": r.booking_date, "doc":"PAG", "doc_id": int(r.bank_move_id), "account_code":"1200","account_name": chart_name.get("1200","Crediti v/clienti"), "dare":0.0, "avere":alloc})
                     else:
                         lines.append({"date": r.booking_date, "doc":"PAG", "doc_id": int(r.bank_move_id), "account_code":"1200","account_name": chart_name.get("1200","Crediti v/clienti"), "dare":alloc, "avere":0.0})
                 else:
-                    # pagamento: Dare debiti
                     if amt < 0:
                         lines.append({"date": r.booking_date, "doc":"PAG", "doc_id": int(r.bank_move_id), "account_code":"2200","account_name": chart_name.get("2200","Debiti v/fornitori"), "dare":alloc, "avere":0.0})
                     else:
                         lines.append({"date": r.booking_date, "doc":"PAG", "doc_id": int(r.bank_move_id), "account_code":"2200","account_name": chart_name.get("2200","Debiti v/fornitori"), "dare":0.0, "avere":alloc})
 
-        # residui -> sospesi
         for _, r in bm_p.iterrows():
             amt = float(r.amount or 0)
             residual = round(max(0.0, abs(amt) - float(r.alloc or 0)), 2)

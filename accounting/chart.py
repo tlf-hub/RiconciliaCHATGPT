@@ -1,6 +1,6 @@
 import pandas as pd
 from typing import Optional
-from db import get_db
+from db import get_db, ensure_schema
 
 DEFAULT_CHART = [
     ("1010", "Banca c/c", "asset"),
@@ -18,6 +18,7 @@ DEFAULT_CHART = [
 ]
 
 def ensure_default_chart():
+    ensure_schema()
     con = get_db()
     cur = con.cursor()
     for code, name, kind in DEFAULT_CHART:
@@ -26,12 +27,14 @@ def ensure_default_chart():
     con.close()
 
 def get_chart_df() -> pd.DataFrame:
+    ensure_schema()
     con = get_db()
     df = pd.read_sql("SELECT * FROM chart_accounts ORDER BY code", con)
     con.close()
     return df
 
 def upsert_account(code: str, name: str, kind: str):
+    ensure_schema()
     con = get_db()
     con.execute(
         "INSERT INTO chart_accounts(code,name,kind) VALUES (?,?,?) "
@@ -42,6 +45,7 @@ def upsert_account(code: str, name: str, kind: str):
     con.close()
 
 def set_party_map(party: str, direction: str, account_code: str):
+    ensure_schema()
     con = get_db()
     con.execute(
         "INSERT INTO party_account_map(party,direction,account_code) VALUES (?,?,?) "
@@ -52,6 +56,7 @@ def set_party_map(party: str, direction: str, account_code: str):
     con.close()
 
 def get_party_account_code(party: str, direction: str) -> Optional[str]:
+    ensure_schema()
     con = get_db()
     cur = con.cursor()
     cur.execute("SELECT account_code FROM party_account_map WHERE party=? AND direction=?", (party, direction))
@@ -60,6 +65,7 @@ def get_party_account_code(party: str, direction: str) -> Optional[str]:
     return row[0] if row else None
 
 def get_account_name(code: str) -> Optional[str]:
+    ensure_schema()
     con = get_db()
     cur = con.cursor()
     cur.execute("SELECT name FROM chart_accounts WHERE code=?", (code,))
