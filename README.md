@@ -1,4 +1,4 @@
-# Riconciliazione Contabile (modulare) — v1.4.0
+# Riconciliazione Contabile (modulare) — v1.4.1
 
 Supporta:
 - Estratto conto CSV (template scaricabile)

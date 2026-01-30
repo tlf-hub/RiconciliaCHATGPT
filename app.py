@@ -12,7 +12,7 @@ from ui.pages_bilancino import render as bilancino_page
 from ui.pages_audit import render as audit_page
 from ui.pages_export import render as export_page
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 
 def main():
     st.set_page_config(page_title="Riconciliazione Contabile", layout="wide")
